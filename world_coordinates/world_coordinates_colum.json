@@ -1,0 +1,62 @@
+{
+  "strategy": "column",
+  "description": "2 columns × 3 rows grid with 3m spacing. Points ordered: Left column top→bottom, then Right column top→bottom",
+  "units": "meters",
+  "spacing": 3.0,
+  "points": [
+    {
+      "name": "Left-Top",
+      "world_coordinates": [0.0, 6.0, 0.0],
+      "pixel_coordinates_dev0": [293.0, 642.6],
+      "pixel_coordinates_dev3": [1251.9, 689.0],
+      "description": "Top-left corner of measurement zone"
+    },
+    {
+      "name": "Left-Middle",
+      "world_coordinates": [0.0, 3.0, 0.0],
+      "pixel_coordinates_dev0": [257.2, 667.4],
+      "pixel_coordinates_dev3": [1223.8, 714.5],
+      "description": "Middle-left point, 3m from top-left"
+    },
+    {
+      "name": "Left-Bottom",
+      "world_coordinates": [0.0, 0.0, 0.0],
+      "pixel_coordinates_dev0": [190.9, 706.1],
+      "pixel_coordinates_dev3": [1177.9, 745.1],
+      "description": "Bottom-left corner, 6m from top-left"
+    },
+    {
+      "name": "Right-Top",
+      "world_coordinates": [3.0, 6.0, 0.0],
+      "pixel_coordinates_dev0": [559.4, 637.1],
+      "pixel_coordinates_dev3": [1505.5, 694.1],
+      "description": "Top-right corner, 3m from left-top"
+    },
+    {
+      "name": "Right-Middle",
+      "world_coordinates": [3.0, 3.0, 0.0],
+      "pixel_coordinates_dev0": [571.8, 666.1],
+      "pixel_coordinates_dev3": [1525.9, 720.9],
+      "description": "Middle-right point"
+    },
+    {
+      "name": "Right-Bottom",
+      "world_coordinates": [3.0, 0.0, 0.0],
+      "pixel_coordinates_dev0": [605.0, 700.6],
+      "pixel_coordinates_dev3": [1564.1, 763.0],
+      "description": "Bottom-right corner"
+    }
+  ],
+  "grid_dimensions": {
+    "width_meters": 3.0,
+    "height_meters": 6.0,
+    "columns": 2,
+    "rows": 3
+  },
+  "coordinate_system": {
+    "x_axis": "Across road (left to right)",
+    "y_axis": "Along road (bottom to top, away from cameras)",
+    "z_axis": "Upwards from ground",
+    "origin": "Bottom-left corner at ground level"
+  }
+}

@@ -1,0 +1,15 @@
+============================================================
+PIPELINE SUMMARY
+============================================================
+
+World coordinates strategy: column
+Scale: 100.0 pixels per meter
+BEV size: 4.0x8.0 meters
+BEV pixels: 400x800
+Frames processed: 4
+FPS: 25.0
+
+Speed statistics:
+  Average: 1.1 km/h
+  Max: 2.3 km/h
+  Min: 0.4 km/h

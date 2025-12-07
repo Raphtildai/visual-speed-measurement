@@ -1,0 +1,129 @@
+{
+  "strategy": "column",
+  "description": "2 columns \u00d7 3 rows grid with 3m spacing",
+  "units": "meters",
+  "spacing": 3.0,
+  "points": [
+    {
+      "name": "Left-Top",
+      "world_coordinates": [
+        0.0,
+        6.0,
+        0.0
+      ],
+      "pixel_coordinates_dev0": [
+        293.0,
+        642.5999755859375
+      ],
+      "pixel_coordinates_dev3": [
+        1251.9000244140625,
+        689.0
+      ],
+      "annotation_order": 1,
+      "description": "Left column, position top"
+    },
+    {
+      "name": "Left-Middle",
+      "world_coordinates": [
+        0.0,
+        3.0,
+        0.0
+      ],
+      "pixel_coordinates_dev0": [
+        257.20001220703125,
+        667.4000244140625
+      ],
+      "pixel_coordinates_dev3": [
+        1223.800048828125,
+        714.5
+      ],
+      "annotation_order": 2,
+      "description": "Left column, position middle"
+    },
+    {
+      "name": "Left-Bottom",
+      "world_coordinates": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "pixel_coordinates_dev0": [
+        190.89999389648438,
+        706.0999755859375
+      ],
+      "pixel_coordinates_dev3": [
+        1177.9000244140625,
+        745.0999755859375
+      ],
+      "annotation_order": 3,
+      "description": "Left column, position bottom"
+    },
+    {
+      "name": "Right-Top",
+      "world_coordinates": [
+        3.0,
+        6.0,
+        0.0
+      ],
+      "pixel_coordinates_dev0": [
+        559.4000244140625,
+        637.0999755859375
+      ],
+      "pixel_coordinates_dev3": [
+        1505.5,
+        694.0999755859375
+      ],
+      "annotation_order": 4,
+      "description": "Right column, position top"
+    },
+    {
+      "name": "Right-Middle",
+      "world_coordinates": [
+        3.0,
+        3.0,
+        0.0
+      ],
+      "pixel_coordinates_dev0": [
+        571.7999877929688,
+        666.0999755859375
+      ],
+      "pixel_coordinates_dev3": [
+        1525.9000244140625,
+        720.9000244140625
+      ],
+      "annotation_order": 5,
+      "description": "Right column, position middle"
+    },
+    {
+      "name": "Right-Bottom",
+      "world_coordinates": [
+        3.0,
+        0.0,
+        0.0
+      ],
+      "pixel_coordinates_dev0": [
+        605.0,
+        700.5999755859375
+      ],
+      "pixel_coordinates_dev3": [
+        1564.0999755859375,
+        763.0
+      ],
+      "annotation_order": 6,
+      "description": "Right column, position bottom"
+    }
+  ],
+  "grid_dimensions": {
+    "width_meters": 3.0,
+    "height_meters": 6.0,
+    "columns": 2,
+    "rows": 3
+  },
+  "coordinate_system": {
+    "x_axis": "Across road (left to right)",
+    "y_axis": "Along road (bottom to top, away from cameras)",
+    "z_axis": "Upwards from ground",
+    "origin": "Bottom-left corner at ground level"
+  },
+  "pixel_coordinates_source": "From your latest annotation output"
+}
