@@ -1,0 +1,69 @@
+# Ignore venv and __pycache__ directories
+venv/
+__pycache__/
+# Ignore compiled Python files
+*.pyc
+
+# Ignore output videos
+results/*.mp4
+
+# Ignore dataset folders and pictures
+# 1. Ignore ALL files in the Dev0 directory.
+/dataset/Dev0/*
+
+# 2. Un-ignore the first 10 frames.
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn1.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn2.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn3.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn4.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn5.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn6.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn7.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn8.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn9.jpg
+!/dataset/Dev0/Dev0_Image_w1920_h1200_fn10.jpg
+
+# Dev3
+/dataset/Dev3/*
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn1.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn2.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn3.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn4.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn5.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn6.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn7.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn8.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn9.jpg
+!/dataset/Dev3/Dev3_Image_w1920_h1200_fn10.jpg
+
+# Rear Camera Datasets
+# Dev1
+/dataset/Dev1/*
+
+# Un-ignore the first 10 frames.
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn1.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn2.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn3.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn4.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn5.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn6.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn7.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn8.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn9.jpg
+!/dataset/Dev1/Dev1_Image_w1920_h1200_fn10.jpg
+
+# Dev2
+/dataset/Dev2/*
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn1.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn2.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn3.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn4.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn5.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn6.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn7.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn8.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn9.jpg
+!/dataset/Dev2/Dev2_Image_w1920_h1200_fn10.jpg
+
+# Ignore zip files
+*.zip
