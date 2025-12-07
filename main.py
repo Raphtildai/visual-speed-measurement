@@ -133,7 +133,7 @@ results = run_pipeline_with_world_coords(
     annotations=ANNOTATIONS_DIR,
     world_coords_dir=WORLD_COORDS_DIR,
     working_dir=WORK_DIR,
-    start_index=START_FRAME,    # Set start index
+    start_index=6,  #START_FRAME,    # Set start index
     num_frames=FRAME_COUNT,     # Set frame count
     scale_px_per_m=SCALE_PX_PER_M,
     fps=25.0,
@@ -143,7 +143,8 @@ results = run_pipeline_with_world_coords(
     world_coords_strategy=WORLD_COORDS_STRATEGY,
     homography_debug=True,
     use_opencv_as_reference=True,
-    test_mode=(RUN_MODE == "TEST")
+    test_mode=(RUN_MODE == "TEST"),
+    checkpoint_every=2  # Save every 100 frames → max loss = 99 frames
 )
 
 print('Pipeline finished. Number of frames processed:', len(results) if results else 0)

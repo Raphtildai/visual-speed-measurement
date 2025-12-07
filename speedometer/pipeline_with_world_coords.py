@@ -336,7 +336,8 @@ def run_pipeline_with_world_coords(
     world_coords_strategy="column",
     homography_debug=False,
     use_opencv_as_reference=True,
-    test_mode=False
+    test_mode=False,
+    checkpoint_every=100
 ):
     def dprint(*args, **kwargs):
         if test_mode:
@@ -387,9 +388,9 @@ def run_pipeline_with_world_coords(
             err0_cv = np.mean(np.linalg.norm(cv2.perspectiveTransform(pts0.reshape(-1,1,2), H0_cv).reshape(-1,2) - world_points_pixels, axis=1))
             err0_dlt = np.mean(np.linalg.norm(cv2.perspectiveTransform(pts0.reshape(-1,1,2), H0).reshape(-1,2) - world_points_pixels, axis=1))
             if err0_cv < err0_dlt: H0 = H0_cv
-            if np.mean(np.linalg.norm(cv2.perspectiveTransform(pts3.reshape(-1,1,2), H3_cv).reshape(-1,2) - world_points_pixels, axis=1)) < \
-               np.mean(np.linalg.norm(cv2.perspectiveTransform(pts3.reshape(-1,1,2), H3).reshape(-1,2) - world_points_pixels, axis=1)):
-                H3 = H3_cv
+            err3_cv = np.mean(np.linalg.norm(cv2.perspectiveTransform(pts3.reshape(-1,1,2), H3_cv).reshape(-1,2) - world_points_pixels, axis=1))
+            err3_dlt = np.mean(np.linalg.norm(cv2.perspectiveTransform(pts3.reshape(-1,1,2), H3).reshape(-1,2) - world_points_pixels, axis=1))
+            if err3_cv < err3_dlt: H3 = H3_cv
 
     if H0 is None or H3 is None:
         logging.error("Failed to compute homographies!")
@@ -409,95 +410,148 @@ def run_pipeline_with_world_coords(
     global_roll_correction = None
     roll_correction_computed = False
 
-    prev_bev0_gray = None
-    results = []
+    # --- Video writer + checkpoint ---
     writer = None
-    if output_video:
-        ensure_dir(os.path.dirname(output_video))
-        writer = imageio.get_writer(output_video, fps=fps)
+    frames_buffer = []
 
-    for i in tqdm(range(num_frames), desc="Processing frames"):
-        img0 = cv2.imread(sel0[i])
-        img3 = cv2.imread(sel3[i])
-        if img0 is None or img3 is None:
-            logging.warning(f"Skipping frame {i}")
-            continue
+    try:
+        if output_video:
+            ensure_dir(os.path.dirname(output_video))
+            writer = imageio.get_writer(
+                output_video, 
+                fps=fps,
+                codec='libx264',
+                quality=8, # Set quality from 1 (lowest) to 10 (highest). 8 is a good balance.
+                pixelformat='yuv420p' 
+                # yuv420p is required by most players/browsers for H.264
+            )
 
-        # --- Auto roll correction (first frame only) ---
-        if not roll_correction_computed:
-            gray0 = cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY)
-            gray3 = cv2.cvtColor(img3, cv2.COLOR_BGR2GRAY)
-            orb = cv2.ORB_create(nfeatures=2000)
-            kp0, des0 = orb.detectAndCompute(gray0, None)
-            kp3, des3 = orb.detectAndCompute(gray3, None)
-            if des0 is not None and des3 is not None and len(kp0) > 20 and len(kp3) > 20:
-                matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-                matches = matcher.match(des0, des3)
-                matches = sorted(matches, key=lambda x: x.distance)[:100]
-                if len(matches) > 15:
-                    src = np.float32([kp0[m.queryIdx].pt for m in matches])
-                    dst = np.float32([kp3[m.trainIdx].pt for m in matches])
-                    M, _ = cv2.estimateAffinePartial2D(src, dst)
-                    if M is not None:
-                        angle = np.arctan2(M[1,0], M[0,0]) * 180 / np.pi
-                        dprint(f"Roll correction applied: {angle:+.3f}°")
-                        h, w = img3.shape[:2]
-                        global_roll_correction = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
-            roll_correction_computed = True
+        prev_bev0_gray = None
+        results = []
 
-        if global_roll_correction is not None:
-            img3 = cv2.warpAffine(img3, global_roll_correction, (img3.shape[1], img3.shape[0]),
-                                  flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        for i in tqdm(range(num_frames), desc="Processing frames"):
+            img0 = cv2.imread(sel0[i])
+            img3 = cv2.imread(sel3[i])
+            if img0 is None or img3 is None:
+                logging.warning(f"Skipping frame {i}")
+                continue
 
-        # --- Refine homographies ---
-        if refine_H_every_N > 0 and i > 0 and i % refine_H_every_N == 0:
-            img0_prev = cv2.imread(sel0[i-1])
-            img3_prev = cv2.imread(sel3[i-1])
-            if img0_prev is not None and img3_prev is not None:
-                H0_current = refine_homography_with_features(H0_current, img0_prev, img0)
-                H3_current = refine_homography_with_features(H3_current, img3_prev, img3)
-                H3_to_0_current = np.linalg.inv(H0_current) @ H3_current
+            # --- Auto roll correction (first frame only) ---
+            if not roll_correction_computed:
+                gray0 = cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY)
+                gray3 = cv2.cvtColor(img3, cv2.COLOR_BGR2GRAY)
+                orb = cv2.ORB_create(nfeatures=2000)
+                kp0, des0 = orb.detectAndCompute(gray0, None)
+                kp3, des3 = orb.detectAndCompute(gray3, None)
+                if des0 is not None and des3 is not None and len(kp0) > 20 and len(kp3) > 20:
+                    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+                    matches = matcher.match(des0, des3)
+                    matches = sorted(matches, key=lambda x: x.distance)[:100]
+                    if len(matches) > 15:
+                        src = np.float32([kp0[m.queryIdx].pt for m in matches])
+                        dst = np.float32([kp3[m.trainIdx].pt for m in matches])
+                        M, _ = cv2.estimateAffinePartial2D(src, dst)
+                        if M is not None:
+                            angle = np.arctan2(M[1,0], M[0,0]) * 180 / np.pi
+                            dprint(f"Roll correction applied: {angle:+.3f}°")
+                            h, w = img3.shape[:2]
+                            global_roll_correction = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
+                roll_correction_computed = True
 
-        # --- Process ---
-        stitched = stitch_two_images_proper(img0, img3, H3_to_0_current)
-        bev0 = warp_to_bev(img0, H0_current, out_size)
-        bev3 = warp_to_bev(img3, H3_current, out_size)
+            if global_roll_correction is not None:
+                img3 = cv2.warpAffine(img3, global_roll_correction,
+                                    (img3.shape[1], img3.shape[0]),
+                                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
-        # --- Speed calculation ---
-        translation_px = np.array([0.0, 0.0])
-        speed_kmh = 0.0
-        if i > 0 and prev_bev0_gray is not None:
-            gray = cv2.cvtColor(bev0, cv2.COLOR_BGR2GRAY)
-            flow = dense_flow_farneback(prev_bev0_gray, gray, params=flow_params or {})
-            mag = np.linalg.norm(flow, axis=2)
-            valid = mag > 0.5
-            if np.sum(valid) > 10:
-                t_px, inliers = ransac_translation_improved(flow, mask=valid)
-                if inliers is not None and np.sum(inliers) > 5:
-                    translation_px = t_px
-                    speed_kmh = np.linalg.norm(t_px) / scale_px_per_m * fps * 3.6
-            prev_bev0_gray = gray
-        else:
-            prev_bev0_gray = cv2.cvtColor(bev0, cv2.COLOR_BGR2GRAY)
+            # --- Refine homographies ---
+            if refine_H_every_N > 0 and i > 0 and i % refine_H_every_N == 0:
+                img0_prev = cv2.imread(sel0[i-1])
+                img3_prev = cv2.imread(sel3[i-1])
+                if img0_prev is not None and img3_prev is not None:
+                    H0_current = refine_homography_with_features(H0_current, img0_prev, img0)
+                    H3_current = refine_homography_with_features(H3_current, img3_prev, img3)
+                    H3_to_0_current = np.linalg.inv(H0_current) @ H3_current
 
-        results.append({
-            'stitched': stitched, 'bev0': bev0, 'bev3': bev3,
-            'translation_px': translation_px, 'speed_kmh': float(speed_kmh),
-            'frame_idx': start_index + i
-        })
+            # --- Process ---
+            stitched = stitch_two_images_proper(img0, img3, H3_to_0_current)
+            bev0 = warp_to_bev(img0, H0_current, out_size)
+            bev3 = warp_to_bev(img3, H3_current, out_size)
 
-        vis_frame = compose_visual_frame(stitched, bev0, bev3, translation_px, speed_kmh)
-        if writer:
-            writer.append_data(cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB))
-        elif test_mode and num_frames <= 10:
-            disp = cv2.resize(vis_frame, None, fx=0.5, fy=0.5)
+            # --- Speed calculation ---
+            translation_px = np.array([0.0, 0.0])
+            speed_kmh = 0.0
+            if i > 0 and prev_bev0_gray is not None:
+                gray = cv2.cvtColor(bev0, cv2.COLOR_BGR2GRAY)
+                flow = dense_flow_farneback(prev_bev0_gray, gray, params=flow_params or {})
+                mag = np.linalg.norm(flow, axis=2)
+                valid = mag > 0.5
+                if np.sum(valid) > 10:
+                    t_px, inliers = ransac_translation_improved(flow, mask=valid)
+                    if inliers is not None and np.sum(inliers) > 5:
+                        translation_px = t_px
+                        speed_kmh = np.linalg.norm(t_px) / scale_px_per_m * fps * 3.6
+                prev_bev0_gray = gray
+            else:
+                prev_bev0_gray = cv2.cvtColor(bev0, cv2.COLOR_BGR2GRAY)
+
+            # --- Store ---
+            results.append({
+                'stitched': stitched, 'bev0': bev0, 'bev3': bev3,
+                'translation_px': translation_px, 'speed_kmh': float(speed_kmh),
+                'frame_idx': start_index + i
+            })
+
+            vis_frame = compose_visual_frame(stitched, bev0, bev3, translation_px, speed_kmh)
+            rgb_frame = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
+            frames_buffer.append(rgb_frame)
+
+            # --- Checkpoint save ---
+            if (i + 1) % checkpoint_every == 0 or (i + 1) == num_frames:
+                if frames_buffer and writer is not None:
+                    for frame in frames_buffer:
+                        writer.append_data(frame)
+                    logging.info(f"Progress saved: {i+1}/{num_frames} frames")
+                    frames_buffer = []
+
+            # --- Live preview and event polling (Run on every frame) ---
+            # The key to responsiveness is calling waitKey(1) every loop.
+            disp = vis_frame # Use original size or resize for better performance
+            # Resize only if not in "full" test_mode (where num_frames > 10) for performance
+            if not (test_mode and num_frames <= 10):
+                disp = cv2.resize(vis_frame, (960, 540)) # Example: Resize for general viewing
+
             cv2.imshow("Speedometer", disp)
-            if cv2.waitKey(1) == ord('q'): break
+            
+            # Check for keyboard interrupt on every frame
+            # waitKey(1) ensures the display window updates and processes events
+            key = cv2.waitKey(1)
+            if key == ord('q') or key == 27: # 'q' or ESC key
+                logging.info("Exiting loop due to keyboard interrupt.")
+                # Check for keyboard interrupt on every frame
+            key = cv2.waitKey(1)
+            if key == ord('q') or key == 27: # 'q' or ESC key
+                logging.info("Exiting loop due to keyboard interrupt.")
+                # --- FLUSH ON INTERRUPT ---
+                if frames_buffer and writer is not None:
+                    for frame in frames_buffer:
+                        writer.append_data(frame)
+                    frames_buffer = [] # Clear buffer after flush
+                # --- END FLUSH ---
+                break # Now safely break the main loop
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during processing: {e}")
+        
+    finally:
+        # Final flush
+        if frames_buffer and writer is not None:
+            for frame in frames_buffer:
+                writer.append_data(frame)
+            logging.info(f"FINAL VIDEO SAVED: {output_video}")
 
-    if writer:
-        writer.close()
-        logging.info(f"Video saved: {output_video}")
-    cv2.destroyAllWindows()
+        if writer:
+            writer.close()
+        cv2.destroyAllWindows()
+
     return results
 
 def compose_visual_frame(stitched_img, bev0, bev3, translation_px, speed_kmh):
