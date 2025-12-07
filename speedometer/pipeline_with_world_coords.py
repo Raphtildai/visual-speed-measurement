@@ -196,85 +196,81 @@ def warp_to_bev(img, H, out_size):
     return cv2.warpPerspective(img, H, out_size)
 
 def stitch_two_images_proper(img0, img3, H3_to_0=None, pts0=None, pts3=None):
-    """
-    Natural-looking panoramic stitch (human binocular vision style)
-    Using calibrated H3_to_0 (Dev3 → Dev0 via world points)
-    """
+    """Natural human-eye-like panoramic stitch - clean 1920x1080 output"""
     if H3_to_0 is None:
-        print("  No homography → fallback side-by-side")
         return np.hstack([img0, img3])
 
     H = H3_to_0.astype(np.float32)
     h0, w0 = img0.shape[:2]
     h3, w3 = img3.shape[:2]
 
-    # --- Find required canvas size ---
     corners = np.float32([[0,0], [w3,0], [w3,h3], [0,h3]]).reshape(-1,1,2)
     corners_warped = cv2.perspectiveTransform(corners, H)
-
     all_x = np.concatenate(([0, w0], corners_warped[:,:,0].flatten()))
     all_y = np.concatenate(([0, h0], corners_warped[:,:,1].flatten()))
-
-    min_x = int(np.floor(all_x.min()))
-    min_y = int(np.floor(all_y.min()))
-    max_x = int(np.ceil(all_x.max()))
-    max_y = int(np.ceil(all_y.max()))
-
-    tx = -min_x if min_x < 0 else 0
-    ty = -min_y if min_y < 0 else 0
-
-    translation = np.array([[1, 0, tx],
-                            [0, 1, ty],
-                            [0, 0, 1]], dtype=np.float32)
-
+    min_x, min_y = int(np.floor(all_x.min())), int(np.floor(all_y.min()))
+    max_x, max_y = int(np.ceil(all_x.max())), int(np.ceil(all_y.max()))
+    tx = max(0, -min_x)
+    ty = max(0, -min_y)
+    translation = np.array([[1, 0, tx], [0, 1, ty], [0, 0, 1]], dtype=np.float32)
     final_w = max_x - min_x + 1
     final_h = max_y - min_y + 1
-
     H_final = translation @ H
 
-    # --- Warp both images to common canvas ---
     warped3 = cv2.warpPerspective(img3, H_final, (final_w, final_h),
                                   flags=cv2.INTER_LINEAR,
                                   borderMode=cv2.BORDER_CONSTANT,
                                   borderValue=(0,0,0))
-
     warped0 = cv2.warpPerspective(img0, translation, (final_w, final_h),
                                   flags=cv2.INTER_LINEAR,
                                   borderMode=cv2.BORDER_CONSTANT,
                                   borderValue=(0,0,0))
 
-    # --- Create binary masks ---
-    mask0 = (warped0 > 20).any(axis=2)   # where Dev0 has content
-    mask3 = (warped3 > 20).any(axis=2)   # where Dev3 has content
+    def match_color(src, ref):
+        src = src.astype(np.float32)
+        ref = ref.astype(np.float32)
+        for c in range(3):
+            s_mean, s_std = src[..., c].mean(), src[..., c].std()
+            r_mean, r_std = ref[..., c].mean(), ref[..., c].std()
+            if s_std > 1.0:
+                src[..., c] = (src[..., c] - s_mean) * (r_std / (s_std + 1e-6)) + r_mean
+        return np.clip(src, 0, 255).astype(np.uint8)
+    warped3 = match_color(warped3, warped0)
 
-    # --- Final result ---
-    result = np.zeros_like(warped0)
+    mask0 = (warped0 > 30).any(axis=2)
+    mask3 = (warped3 > 30).any(axis=2)
 
-    # 1. Where only Dev0 → copy Dev0
-    only0 = mask0 & ~mask3
-    result[only0] = warped0[only0]
-
-    # 2. Where only Dev3 → copy Dev3
-    only3 = mask3 & ~mask0
-    result[only3] = warped3[only3]
-
-    # 3. Overlap → 50/50 blend (this is the key line that was crashing)
+    result = warped0.copy()
     overlap = mask0 & mask3
     if overlap.any():
-        blended = cv2.addWeighted(warped0[overlap], 0.5,
-                                  warped3[overlap], 0.5, 0)
+        blended = cv2.addWeighted(warped0[overlap], 0.6, warped3[overlap], 0.4, 0)
         result[overlap] = blended
+    result[mask3 & ~mask0] = warped3[mask3 & ~mask0]
 
-    # if overlap.any():
-    #     # Multi-band blending or seamlessClone (photoshop-level)
-    #     center_x = final_w // 2
-    #     center_y = final_h // 2
-    #     result = cv2.seamlessClone(warped3, result, (mask3*255).astype(np.uint8),
-    #                             (center_x, center_y), cv2.NORMAL_CLONE)
+    gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        x, y, w, h = cv2.boundingRect(np.vstack(contours))
+        pad = 30
+        x = max(0, x - pad)
+        y = max(0, y - pad)
+        w = min(final_w - x, w + 2*pad)
+        h = min(final_h - y, h + 2*pad)
+        cropped = result[y:y+h, x:x+w]
+    else:
+        cropped = result
 
-    print(f"  Natural panorama stitched: {final_w}×{final_h}")
-    return result
-
+    target_w, target_h = 1920, 1080
+    scale = min(target_w / cropped.shape[1], target_h / cropped.shape[0])
+    new_w, new_h = int(cropped.shape[1] * scale), int(cropped.shape[0] * scale)
+    resized = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    final = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    oy = (target_h - new_h) // 2
+    ox = (target_w - new_w) // 2
+    final[oy:oy+new_h, ox:ox+new_w] = resized
+    return final
+    
 def refine_homography_with_features(H, img_prev, img_curr, method='orb'):
     """
     Refines the homography H (img_prev -> world/BEV) by tracking features.
@@ -337,396 +333,171 @@ def run_pipeline_with_world_coords(
     output_video='./results/result_speedometer.mp4',
     flow_params=None,
     refine_H_every_N=0,
-    world_coords_strategy="column",  # "column" or "row"
-    homography_debug=True,
-    use_opencv_as_reference=True
+    world_coords_strategy="column",
+    homography_debug=False,
+    use_opencv_as_reference=True,
+    test_mode=False
 ):
-    """
-    Pipeline with world coordinates loaded from JSON files.
-    
-    Args:
-        world_coords_strategy: "column" or "row" - which world coordinate file to use
-        world_coords_dir: Directory containing world coordinate JSON files
-    """
+    def dprint(*args, **kwargs):
+        if test_mode:
+            print(*args, **kwargs)
+
     ensure_dir(working_dir)
-    
-    # Find image files
+
+    # --- Load images ---
     dev0_files = glob.glob(os.path.join(all_images_dir, "Dev0", "*.jpg")) + \
                  glob.glob(os.path.join(all_images_dir, "Dev0", "*.png")) + \
                  glob.glob(os.path.join(all_images_dir, "Dev0", "*.jpeg"))
-    
     dev3_files = glob.glob(os.path.join(all_images_dir, "Dev3", "*.jpg")) + \
                  glob.glob(os.path.join(all_images_dir, "Dev3", "*.png")) + \
                  glob.glob(os.path.join(all_images_dir, "Dev3", "*.jpeg"))
-
     dev0_list = sorted(dev0_files, key=natural_sort_key)
     dev3_list = sorted(dev3_files, key=natural_sort_key)
-
     if num_frames is None:
         num_frames = min(len(dev0_list), len(dev3_list))
-
     sel0 = dev0_list[start_index:start_index + num_frames]
     sel3 = dev3_list[start_index:start_index + num_frames]
 
     if len(sel0) == 0 or len(sel3) == 0:
-        logging.error("No images found in the specified directories!")
+        logging.error("No images found!")
         return []
 
-    logging.info(f"Using {len(sel0)} Dev0 frames and {len(sel3)} Dev3 frames")
-    logging.info(f"First Dev0: {os.path.basename(sel0[0])}")
-    logging.info(f"First Dev3: {os.path.basename(sel3[0])}")
+    # --- Load world coordinates & annotations ---
+    world_points_meters, _ = load_world_coordinates(world_coords_strategy, world_coords_dir)
+    world_points_pixels = world_points_meters * scale_px_per_m
 
-    # --- Load World Coordinates ---
-    logging.info(f"\nLoading world coordinates using '{world_coords_strategy}' strategy...")
-    try:
-        world_points_meters, world_metadata = load_world_coordinates(
-            strategy=world_coords_strategy, 
-            world_coords_dir=world_coords_dir
-        )
-        
-        logging.info(f"Successfully loaded world coordinates:")
-        logging.info(f"  Strategy: {world_metadata.get('strategy', 'unknown')}")
-        logging.info(f"  Spacing: {world_metadata.get('spacing', 'unknown')} meters")
-        logging.info(f"  Grid: {world_metadata.get('grid_dimensions', {}).get('columns', 'unknown')}×{world_metadata.get('grid_dimensions', {}).get('rows', 'unknown')}")
-        logging.info(f"  Points shape: {world_points_meters.shape}")
-        
-        # Convert world coordinates from meters to pixels
-        world_points_pixels = world_points_meters * scale_px_per_m
-        logging.info(f"  World points scaled to pixels (@ {scale_px_per_m} px/m)")
-        
-        # Print world coordinates for verification
-        print("\n" + "="*60)
-        print("WORLD COORDINATES")
-        print("="*60)
-        for i, (world_m, world_px) in enumerate(zip(world_points_meters, world_points_pixels)):
-            print(f"Point {i+1}: World {world_m} meters -> {world_px} pixels")
-        
-    except Exception as e:
-        logging.error(f"Failed to load world coordinates: {e}")
-        logging.error("Falling back to default world coordinates...")
-        # Fallback to default coordinates
-        if world_coords_strategy == "column":
-            world_points_meters = np.array([
-                [0.0, 6.0], [0.0, 3.0], [0.0, 0.0],
-                [3.0, 6.0], [3.0, 3.0], [3.0, 0.0]
-            ], dtype=np.float32)
-        else:  # row strategy
-            world_points_meters = np.array([
-                [0.0, 3.0], [3.0, 3.0], [6.0, 3.0],
-                [0.0, 0.0], [3.0, 0.0], [6.0, 0.0]
-            ], dtype=np.float32)
-        
-        world_points_pixels = world_points_meters * scale_px_per_m
+    pts0, pts3, _ = load_annotation_or_annotate_final(sel0[0], sel3[0],
+                                                      dev0_json=os.path.join(annotations, 'dev0_pts.json'),
+                                                      dev3_json=os.path.join(annotations, 'dev3_pts.json'))
 
-    # --- Load Pixel Annotations ---
-    dev0_json = os.path.join(annotations, 'dev0_pts.json')
-    dev3_json = os.path.join(annotations, 'dev3_pts.json')
-    
-    # Load or create annotations
-    pts0, pts3, _ = load_annotation_or_annotate_final(sel0[0], sel3[0], 
-                                                      dev0_json=dev0_json, 
-                                                      dev3_json=dev3_json)
-    
-    # --- Debug: Point Correspondence Check ---
-    # After loading pts0 and pts3, add this debug code:
-    print("\n" + "="*60)
-    print("POINT CORRESPONDENCE DEBUG")
-    print("="*60)
+    # Trim points if needed
+    n_points = min(len(pts0), len(world_points_meters))
+    pts0 = pts0[:n_points]
+    pts3 = pts3[:n_points]
+    world_points_pixels = world_points_pixels[:n_points]
 
-    print(f"\nDev0 points (pixel coordinates):")
-    for i, pt in enumerate(pts0):
-        print(f"  Point {i+1}: ({pt[0]:.1f}, {pt[1]:.1f})")
+    # --- Calculate homographies ---
+    H0 = calculate_normalized_homography(pts0, world_points_pixels)
+    H3 = calculate_normalized_homography(pts3, world_points_pixels)
 
-    print(f"\nDev3 points (pixel coordinates):")
-    for i, pt in enumerate(pts3):
-        print(f"  Point {i+1}: ({pt[0]:.1f}, {pt[1]:.1f})")
-
-    # Test direct homography
-    print(f"\nTesting direct homography from Dev3 to Dev0:")
-    H_direct_test, mask_test = cv2.findHomography(pts3, pts0, cv2.RANSAC, 5.0)
-    if H_direct_test is not None:
-        inliers = np.sum(mask_test) if mask_test is not None else "unknown"
-        print(f"  ✓ Direct homography computed, inliers: {inliers}/{len(pts3)}")
-        
-        # Test what this homography does to the corners
-        corners_img3 = np.array([[0, 0], [1920, 0], [1920, 1200], [0, 1200]], dtype=np.float32)
-        corners_transformed = cv2.perspectiveTransform(
-            corners_img3.reshape(-1, 1, 2), H_direct_test
-        ).reshape(-1, 2)
-        
-        print(f"  Corners of Dev3 in Dev0 coordinates:")
-        for i, (orig, trans) in enumerate(zip(corners_img3, corners_transformed)):
-            print(f"    Corner {i}: {orig.astype(int)} -> {trans.astype(int)}")
-        
-        avg_x = np.mean(corners_transformed[:, 0])
-        print(f"  Average X position: {avg_x:.1f}")
-        if avg_x < 1920/2:
-            print(f"  ⚠ WARNING: Homography doesn't move image to the right!")
-        else:
-            print(f"  ✓ Good: Homography moves image to the right")
-    else:
-        print(f"  ✗ Failed to compute direct homography")
-    
-    if len(pts0) < 4 or len(pts3) < 4:
-        logging.error(f"Need at least 4 points, got {len(pts0)} for Dev0 and {len(pts3)} for Dev3")
-        return []
-    
-    # --- Debug: Point Correspondence Check ---
-    
-    # Verify that we have the right number of points
-    if len(pts0) != len(world_points_meters):
-        logging.warning(f"Point count mismatch: {len(pts0)} pixel points vs {len(world_points_meters)} world points")
-        logging.warning("Using first N points where N = min(pixel_points, world_points)")
-        n_points = min(len(pts0), len(world_points_meters))
-        pts0 = pts0[:n_points]
-        pts3 = pts3[:n_points]
-        world_points_pixels = world_points_pixels[:n_points]
-        world_points_meters = world_points_meters[:n_points]
-    
-    # --- Calculate Homographies ---
-    if homography_debug:
-        print("\n" + "="*60)
-        print("HOMOGRAPHY CALCULATION WITH WORLD COORDINATES")
-        print("="*60)
-        
-        print(f"\nUsing world coordinates strategy: {world_coords_strategy}")
-        print(f"Scale: {scale_px_per_m} pixels per meter")
-        
-        print(f"\nPixel ↔ World correspondence:")
-        for i, (pixel_pt, world_m, world_px) in enumerate(zip(pts0, world_points_meters, world_points_pixels)):
-            print(f"  Point {i+1}: Pixel {pixel_pt.astype(int)} ↔ World {world_m} m ↔ {world_px.astype(int)} px")
-    
-    # Calculate homographies using normalized DLT
-    H0 = calculate_normalized_homography(pts0, world_points_pixels, debug=homography_debug)
-    H3 = calculate_normalized_homography(pts3, world_points_pixels, debug=homography_debug)
-    
-    # Also calculate using OpenCV for comparison
     if use_opencv_as_reference and H0 is not None and H3 is not None:
-        H0_opencv, mask0 = cv2.findHomography(pts0, world_points_pixels, cv2.RANSAC, 5.0)
-        H3_opencv, mask3 = cv2.findHomography(pts3, world_points_pixels, cv2.RANSAC, 5.0)
-        
-        if homography_debug and H0_opencv is not None and H3_opencv is not None:
-            print("\n" + "="*50)
-            print("OPENCV REFERENCE VALIDATION")
-            print("="*50)
-            
-            # Validate both methods
-            valid0_dlt, err0_dlt = validate_homography(H0, pts0, world_points_pixels, "DLT H0", threshold=100)
-            valid0_cv, err0_cv = validate_homography(H0_opencv, pts0, world_points_pixels, "OpenCV H0", threshold=100)
-            
-            valid3_dlt, err3_dlt = validate_homography(H3, pts3, world_points_pixels, "DLT H3", threshold=100)
-            valid3_cv, err3_cv = validate_homography(H3_opencv, pts3, world_points_pixels, "OpenCV H3", threshold=100)
-            
-            # Choose the better homography based on reprojection error
-            if err0_cv < err0_dlt:
-                print(f"\nUsing OpenCV H0 (error: {err0_cv:.2f} vs DLT: {err0_dlt:.2f})")
-                H0 = H0_opencv
-            else:
-                print(f"\nUsing DLT H0 (error: {err0_dlt:.2f} vs OpenCV: {err0_cv:.2f})")
-            
-            if err3_cv < err3_dlt:
-                print(f"Using OpenCV H3 (error: {err3_cv:.2f} vs DLT: {err3_dlt:.2f})")
-                H3 = H3_opencv
-            else:
-                print(f"Using DLT H3 (error: {err3_dlt:.2f} vs OpenCV: {err3_cv:.2f})")
-    
+        H0_cv, _ = cv2.findHomography(pts0, world_points_pixels, cv2.RANSAC, 5.0)
+        H3_cv, _ = cv2.findHomography(pts3, world_points_pixels, cv2.RANSAC, 5.0)
+        if H0_cv is not None and H3_cv is not None:
+            err0_cv = np.mean(np.linalg.norm(cv2.perspectiveTransform(pts0.reshape(-1,1,2), H0_cv).reshape(-1,2) - world_points_pixels, axis=1))
+            err0_dlt = np.mean(np.linalg.norm(cv2.perspectiveTransform(pts0.reshape(-1,1,2), H0).reshape(-1,2) - world_points_pixels, axis=1))
+            if err0_cv < err0_dlt: H0 = H0_cv
+            if np.mean(np.linalg.norm(cv2.perspectiveTransform(pts3.reshape(-1,1,2), H3_cv).reshape(-1,2) - world_points_pixels, axis=1)) < \
+               np.mean(np.linalg.norm(cv2.perspectiveTransform(pts3.reshape(-1,1,2), H3).reshape(-1,2) - world_points_pixels, axis=1)):
+                H3 = H3_cv
+
     if H0 is None or H3 is None:
-        logging.error("Failed to calculate homographies!")
+        logging.error("Failed to compute homographies!")
         return []
-    
-    # Calculate stitching homography: H3_to_0 = inv(H0) @ H3
+
     H3_to_0 = np.linalg.inv(H0) @ H3
-
-    # After calculating H3_to_0:
-    print(f"\nStitching homography H3_to_0:")
-    print(H3_to_0)
-
-    # Check if it's reasonable
-    if np.abs(H3_to_0[0, 0] - 1.0) < 0.1 and np.abs(H3_to_0[1, 1] - 1.0) < 0.1:
-        print("WARNING: H3_to_0 is nearly identity - stitching won't work well!")
-        print("Consider using side-by-side display instead.")
-    
-    # BEV output size
-    bev_w = int(bev_out_meters[0] * scale_px_per_m)
-    bev_h = int(bev_out_meters[1] * scale_px_per_m)
-    out_size = (bev_w, bev_h)
-    
-    if homography_debug:
-        print(f"\nBEV output size: {bev_w}x{bev_h} pixels")
-        print(f"BEV world size: {bev_out_meters[0]}x{bev_out_meters[1]} meters")
-        
-        # Test projection of world coordinates back to image
-        print("\n" + "="*50)
-        print("WORLD-TO-IMAGE PROJECTION TEST")
-        print("="*50)
-        
-        H0_inv = np.linalg.inv(H0)
-        for i, (world_m, world_px) in enumerate(zip(world_points_meters, world_points_pixels)):
-            world_homo = np.append(world_px, 1)
-            projected_pixel = H0_inv @ world_homo
-            projected_pixel = projected_pixel[:2] / projected_pixel[2]
-            error = np.linalg.norm(projected_pixel - pts0[i])
-            print(f"Point {i+1}: World {world_m} → Pixel {projected_pixel.astype(int)} (error: {error:.1f} px)")
-    
-    # Initialize tracking variables
-    prev_bev0_gray = None
-    results = []
-    
-    # Homography refinement tracking
     H0_current = H0.copy()
     H3_current = H3.copy()
     H3_to_0_current = H3_to_0.copy()
-    
-    # Video writer setup
-    is_interactive_test = (output_video is None) and (num_frames <= 10)
+
+    # --- BEV size ---
+    bev_w = int(bev_out_meters[0] * scale_px_per_m)
+    bev_h = int(bev_out_meters[1] * scale_px_per_m)
+    out_size = (bev_w, bev_h)
+
+    # --- Roll correction (computed once) ---
+    global_roll_correction = None
+    roll_correction_computed = False
+
+    prev_bev0_gray = None
+    results = []
     writer = None
-    
     if output_video:
         ensure_dir(os.path.dirname(output_video))
-        try:
-            writer = imageio.get_writer(output_video, fps=fps)
-        except Exception as e:
-            logging.error(f"Failed to create video writer: {e}")
-            writer = None
-    
-    # --- Main Processing Loop ---
-    for i in tqdm(range(num_frames)):
+        writer = imageio.get_writer(output_video, fps=fps)
+
+    for i in tqdm(range(num_frames), desc="Processing frames"):
         img0 = cv2.imread(sel0[i])
         img3 = cv2.imread(sel3[i])
-        
         if img0 is None or img3 is None:
-            logging.warning(f"Skipping frame {i}: Failed to load one or both images.")
+            logging.warning(f"Skipping frame {i}")
             continue
-        
-        # Homography refinement if enabled
+
+        # --- Auto roll correction (first frame only) ---
+        if not roll_correction_computed:
+            gray0 = cv2.cvtColor(img0, cv2.COLOR_BGR2GRAY)
+            gray3 = cv2.cvtColor(img3, cv2.COLOR_BGR2GRAY)
+            orb = cv2.ORB_create(nfeatures=2000)
+            kp0, des0 = orb.detectAndCompute(gray0, None)
+            kp3, des3 = orb.detectAndCompute(gray3, None)
+            if des0 is not None and des3 is not None and len(kp0) > 20 and len(kp3) > 20:
+                matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+                matches = matcher.match(des0, des3)
+                matches = sorted(matches, key=lambda x: x.distance)[:100]
+                if len(matches) > 15:
+                    src = np.float32([kp0[m.queryIdx].pt for m in matches])
+                    dst = np.float32([kp3[m.trainIdx].pt for m in matches])
+                    M, _ = cv2.estimateAffinePartial2D(src, dst)
+                    if M is not None:
+                        angle = np.arctan2(M[1,0], M[0,0]) * 180 / np.pi
+                        dprint(f"Roll correction applied: {angle:+.3f}°")
+                        h, w = img3.shape[:2]
+                        global_roll_correction = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
+            roll_correction_computed = True
+
+        if global_roll_correction is not None:
+            img3 = cv2.warpAffine(img3, global_roll_correction, (img3.shape[1], img3.shape[0]),
+                                  flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+
+        # --- Refine homographies ---
         if refine_H_every_N > 0 and i > 0 and i % refine_H_every_N == 0:
             img0_prev = cv2.imread(sel0[i-1])
             img3_prev = cv2.imread(sel3[i-1])
-            
             if img0_prev is not None and img3_prev is not None:
                 H0_current = refine_homography_with_features(H0_current, img0_prev, img0)
                 H3_current = refine_homography_with_features(H3_current, img3_prev, img3)
                 H3_to_0_current = np.linalg.inv(H0_current) @ H3_current
-        
-        # --- Process Frame ---
-        stitched = stitch_two_images_proper(img0, img3, H3_to_0_current, pts0, pts3)
+
+        # --- Process ---
+        stitched = stitch_two_images_proper(img0, img3, H3_to_0_current)
         bev0 = warp_to_bev(img0, H0_current, out_size)
         bev3 = warp_to_bev(img3, H3_current, out_size)
-        
-        # Optical flow and speed calculation
+
+        # --- Speed calculation ---
         translation_px = np.array([0.0, 0.0])
         speed_kmh = 0.0
-        
         if i > 0 and prev_bev0_gray is not None:
             gray = cv2.cvtColor(bev0, cv2.COLOR_BGR2GRAY)
-            
-            if flow_params is None:
-                flow_params = {
-                    'pyr_scale': 0.5,
-                    'levels': 3,
-                    'winsize': 15,
-                    'iterations': 3,
-                    'poly_n': 5,
-                    'poly_sigma': 1.2,
-                    'flags': 0
-                }
-            
-            flow = dense_flow_farneback(prev_bev0_gray, gray, params=flow_params)
-            
+            flow = dense_flow_farneback(prev_bev0_gray, gray, params=flow_params or {})
             mag = np.linalg.norm(flow, axis=2)
-            valid_mask = mag > 0.5
-            
-            if np.sum(valid_mask) > 10:
-                t_px, inliers = ransac_translation_improved(flow, mask=valid_mask)
-                
+            valid = mag > 0.5
+            if np.sum(valid) > 10:
+                t_px, inliers = ransac_translation_improved(flow, mask=valid)
                 if inliers is not None and np.sum(inliers) > 5:
                     translation_px = t_px
-                    speed_m_per_frame = np.linalg.norm(t_px) / scale_px_per_m
-                    speed_kmh = speed_m_per_frame * fps * 3.6
-            
+                    speed_kmh = np.linalg.norm(t_px) / scale_px_per_m * fps * 3.6
             prev_bev0_gray = gray
         else:
             prev_bev0_gray = cv2.cvtColor(bev0, cv2.COLOR_BGR2GRAY)
-        
-        # Store results
-        results.append({
-            'stitched': stitched,
-            'bev0': bev0,
-            'bev3': bev3,
-            'translation_px': translation_px,
-            'speed_kmh': float(speed_kmh),
-            'frame_idx': start_index + i,
-            'H0': H0_current.copy(),
-            'H3': H3_current.copy()
-        })
-        
-        # In run_pipeline_with_world_coords function, right before calling compose_visual_frame:
-        print(f"\nFrame {i} debug:")
-        print(f"  Stitched image shape: {stitched.shape}")
-        print(f"  BEV0 shape: {bev0.shape}")
-        print(f"  BEV3 shape: {bev3.shape}")
-        print(f"  Stitched position should be centered in middle panel")
 
-        # vis_frame = compose_visual_frame(stitched, bev0, bev3, translation_px, speed_kmh)
-        # Visualization
+        results.append({
+            'stitched': stitched, 'bev0': bev0, 'bev3': bev3,
+            'translation_px': translation_px, 'speed_kmh': float(speed_kmh),
+            'frame_idx': start_index + i
+        })
+
         vis_frame = compose_visual_frame(stitched, bev0, bev3, translation_px, speed_kmh)
-        
         if writer:
             writer.append_data(cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB))
-        
-        elif is_interactive_test:
-            DISPLAY_SCALE = 0.5
-            display_frame = cv2.resize(vis_frame, None,
-                                     fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
-                                     interpolation=cv2.INTER_LINEAR)
-            
-            window_title = f"Frame {start_index + i + 1}/{start_index + num_frames} | Speed: {speed_kmh:.1f} km/h"
-            cv2.imshow(window_title, display_frame)
-            
-            key = cv2.waitKey(0 if i == 0 else 1)
-            if key == ord('q'):
-                break
-    
-    # Cleanup
+        elif test_mode and num_frames <= 10:
+            disp = cv2.resize(vis_frame, None, fx=0.5, fy=0.5)
+            cv2.imshow("Speedometer", disp)
+            if cv2.waitKey(1) == ord('q'): break
+
     if writer:
         writer.close()
-        logging.info(f'Video written to {output_video}')
-    elif is_interactive_test:
-        cv2.destroyAllWindows()
-    
-    # Save homography matrices and world coordinates for future use
-    homography_file = os.path.join(working_dir, 'homography_with_world_coords.npz')
-    np.savez(homography_file, 
-             H0=H0, H3=H3, H3_to_0=H3_to_0,
-             pts0=pts0, pts3=pts3,
-             world_points_meters=world_points_meters,
-             world_points_pixels=world_points_pixels,
-             scale_px_per_m=scale_px_per_m,
-             world_coords_strategy=world_coords_strategy,
-             world_metadata=world_metadata)
-    logging.info(f'Homography matrices saved to {homography_file}')
-    
-    # Also save a summary text file
-    summary_file = os.path.join(working_dir, 'pipeline_summary.txt')
-    with open(summary_file, 'w') as f:
-        f.write("="*60 + "\n")
-        f.write("PIPELINE SUMMARY\n")
-        f.write("="*60 + "\n\n")
-        f.write(f"World coordinates strategy: {world_coords_strategy}\n")
-        f.write(f"Scale: {scale_px_per_m} pixels per meter\n")
-        f.write(f"BEV size: {bev_out_meters[0]}x{bev_out_meters[1]} meters\n")
-        f.write(f"BEV pixels: {bev_w}x{bev_h}\n")
-        f.write(f"Frames processed: {len(results)}\n")
-        f.write(f"FPS: {fps}\n\n")
-        
-        if len(results) > 0:
-            speeds = [r['speed_kmh'] for r in results if r['speed_kmh'] > 0]
-            if speeds:
-                f.write(f"Speed statistics:\n")
-                f.write(f"  Average: {np.mean(speeds):.1f} km/h\n")
-                f.write(f"  Max: {np.max(speeds):.1f} km/h\n")
-                f.write(f"  Min: {np.min(speeds):.1f} km/h\n")
-    
+        logging.info(f"Video saved: {output_video}")
+    cv2.destroyAllWindows()
     return results
 
 def compose_visual_frame(stitched_img, bev0, bev3, translation_px, speed_kmh):

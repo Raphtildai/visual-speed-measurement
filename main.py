@@ -10,7 +10,7 @@ WORK_DIR = 'speed_work'
 
 # --- CONFIGURATION SWITCH ---
 # OPTIONS: "FULL", "HALF1", "HALF2", "CHUNK", "TEST"
-RUN_MODE = "TEST"   
+RUN_MODE = "HALF1"   
 # --------------------------
 
 # Based on your 3m spacing world coordinates:
@@ -142,7 +142,8 @@ results = run_pipeline_with_world_coords(
     flow_params=flow_params,
     world_coords_strategy=WORLD_COORDS_STRATEGY,
     homography_debug=True,
-    use_opencv_as_reference=True
+    use_opencv_as_reference=True,
+    test_mode=(RUN_MODE == "TEST")
 )
 
 print('Pipeline finished. Number of frames processed:', len(results) if results else 0)
