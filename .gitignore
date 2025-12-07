@@ -87,3 +87,6 @@ results/*.mp4
 
 # Ignore zip files
 *.zip
+
+# Ignore the .pkl files
+*.pkl
