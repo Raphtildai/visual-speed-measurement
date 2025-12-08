@@ -1,22 +1,3 @@
-I will add a section showing the annotated images to your README for you to copy-paste.
-
-Here is the section to add under "4. Output and Artifacts 💾":
-
-```markdown
-### 4.2 Annotated Images 🖼️
-
-These images illustrate the initial setup for homography calculation, showing the manually selected control points in the image plane that correspond to known world coordinates.
-
-| Camera | Image | Description |
-| :---: | :---: | :--- |
-| **Dev0 (Left Camera)** |  | Points selected for the Left Camera (`dev0_pts.json`). |
-| **Dev3 (Right Camera)** |  | Points selected for the Right Camera (`dev3_pts.json`). |
-```
-
-I'll now provide the complete updated README, incorporating this new section and renumbering the subsequent sections.
-
-\<hr\>
-
 ## 🚗 Camera-Based Speedometer Project README
 
 This project implements a camera-based speedometer by calculating the ego-motion of a vehicle using homographies, Bird's-Eye View (BEV) transformation, dense optical flow, and RANSAC-based robust estimation.
