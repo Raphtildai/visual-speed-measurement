@@ -6,6 +6,7 @@ __pycache__/
 
 # Ignore output videos
 results/*.mp4
+!/results/result_speedometer_test.mp4
 
 # Ignore dataset folders and pictures
 # 1. Ignore ALL files in the Dev0 directory.
