@@ -63,8 +63,9 @@ def ransac_translation_improved(flow, mask=None, n_iter=1000, sample_size=10, to
     # Refined model: Calculate the mean of all found inliers
     refined = vecs[best_inliers_global_inds].mean(axis=0)
 
+    # Create the final inlier mask
     inlier_mask = np.zeros(H*W, dtype=bool)
     inlier_mask[best_inliers_global_inds] = True
     inlier_mask = inlier_mask.reshape(H,W)
-    
+
     return refined, inlier_mask
