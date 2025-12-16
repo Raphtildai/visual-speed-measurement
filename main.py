@@ -14,7 +14,7 @@ WORK_DIR = 'speed_work'
 
 # --- CONFIGURATION SWITCH ---
 # OPTIONS: "FULL", "HALF1", "HALF2", "CHUNK", "TEST"
-RUN_MODE = "HALF1"
+RUN_MODE = "TEST"
 # --------------------------
 
 # --- GEOMETRY CONFIGURATION ---
@@ -22,10 +22,10 @@ WORLD_WIDTH = 3.0
 WORLD_LENGTH = 6.0  
 
 # OPTIMIZATION 1: REDUCE BEV RESOLUTION 
-SCALE_PX_PER_M = 50.0  
+SCALE_PX_PER_M = 150.0  
 
 # BEV output size in meters
-BEV_WIDTH_M = WORLD_WIDTH + 1.0
+BEV_WIDTH_M = WORLD_WIDTH + 1.5
 BEV_LENGTH_M = WORLD_LENGTH + 2.0
 
 # World coordinate strategy: "column" or "row"
@@ -64,6 +64,9 @@ else:
 
 # OPTIMIZATION 2: FASTER OPTICAL FLOW PARAMETERS
 flow_params = dict(pyr_scale=0.5, levels=2, winsize=13, iterations=2, poly_n=5, poly_sigma=1.2, flags=0)
+
+# # OPTIMIZATION 2: FASTER OPTICAL FLOW PARAMETERS
+# flow_params = dict(pyr_scale=0.5, levels=3, winsize=15, iterations=3, poly_n=7, poly_sigma=1.5, flags=0)
 
 # --- World Coordinate File Check ---
 print(f"Running pipeline in {RUN_MODE} mode...")
@@ -117,7 +120,7 @@ results = run_pipeline_with_world_coords(
     start_index=START_FRAME,
     num_frames=FRAME_COUNT,
     scale_px_per_m=SCALE_PX_PER_M,
-    fps=25.0,
+    fps=4.0,
     bev_out_meters=(BEV_WIDTH_M, BEV_LENGTH_M),
     output_video=OUTPUT_VIDEO,
     flow_params=flow_params,

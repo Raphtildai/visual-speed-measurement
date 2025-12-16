@@ -13,6 +13,7 @@ import numpy.linalg
 from .annotate import load_annotation_or_annotate_final
 from .bev_and_flow import dense_flow_farneback
 from .ransac_speed import ransac_translation_improved
+from .homographies import stitch_two_images
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -183,7 +184,7 @@ def stitch_two_images_optimized(img0, img3, H3_to_0):
     # Where they overlap, blend
     overlap = mask0 & mask3
     if overlap.any():
-        blended = cv2.addWeighted(warped0[overlap], 0.6, warped3[overlap], 0.4, 0)
+        blended = cv2.addWeighted(warped0[overlap], 0.5, warped3[overlap], 0.5, 0)
         result[overlap] = blended
 
     # Crop black borders (ROI calculation)
@@ -197,16 +198,21 @@ def stitch_two_images_optimized(img0, img3, H3_to_0):
     
     cropped = result[y:y+h, x:x+w]
     
-    # Final resize to 1920x1080
-    target_w, target_h = 1920, 1080
+    # # Final resize to 1920x1080
+    # target_w, target_h = 1920, 1080
     
-    # Use INTER_LINEAR for speed
-    if cropped.size == 0:
-        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    # # Use INTER_LINEAR for speed
+    # if cropped.size == 0:
+    #     return np.zeros((target_h, target_w, 3), dtype=np.uint8)
 
-    resized = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+    # resized = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
     
-    return resized
+    # return resized
+
+    # Return the cropped union directly (preserves natural aspect ratio)
+    if cropped.size == 0:
+        return np.zeros((720, 1280, 3), dtype=np.uint8)  # Fallback
+    return cropped
 
 def refine_homography_with_features(H, img_prev, img_curr):
     """Refines homography."""
@@ -361,13 +367,10 @@ def run_pipeline_with_world_coords(
 
             # OPTIMIZATION: Color Match 
             img3 = match_color_fast(img3, img0)
+            img0 = match_color_fast(img0, img3)  
 
             # OPTIMIZATION: Stitching
-            stitched = stitch_two_images_optimized(img0, img3, H3_to_0_curr)
-
-            # # Create BEVs
-            # bev0 = cv2.warpPerspective(img0, H0_curr, out_size)
-            # bev3 = cv2.warpPerspective(img3, H3_curr, out_size)
+            stitched = stitch_two_images(img0, img3, H3_to_0_curr)
 
             # After (using INTER_CUBIC for better quality at the cost of slight speed):
             bev0 = cv2.warpPerspective(img0, H0_curr, out_size, flags=cv2.INTER_CUBIC)
@@ -392,7 +395,20 @@ def run_pipeline_with_world_coords(
                         # Smooth the translation vector
                         translation_px = translation_smoother.update(raw_translation_px)
                         
+                        # Apply minimum translation threshold based on scale
+                        if scale_px_per_m <= 60:
+                            min_translation_threshold_px = 0.8
+                        elif scale_px_per_m <= 120:
+                            min_translation_threshold_px = 1.2
+                        else:
+                            min_translation_threshold_px = 1.5  # Safe for 150+
+
+                        if np.linalg.norm(translation_px) < min_translation_threshold_px:
+                            translation_px = np.array([0.0, 0.0])
+                            
                         raw_speed_kmh = np.linalg.norm(translation_px) / scale_px_per_m * fps * 3.6
+                        # Speed clipping for better smoothing
+                        raw_speed_kmh = min(raw_speed_kmh, 200.0)  # Cap at 200 km/h 
                         # Smooth the final speed value
                         speed_kmh = speed_smoother.update(raw_speed_kmh)
             
@@ -491,8 +507,20 @@ def compose_visual_frame(stitched_img, bev0, bev3, translation_px, speed_kmh, be
     # Resize and combine frames
     bev0_r = cv2.resize(bev0, (side_w, main_h), interpolation=cv2.INTER_LINEAR)
     bev3_r = cv2.resize(bev3, (side_w, main_h), interpolation=cv2.INTER_LINEAR)
-    stitched_r = cv2.resize(stitched_img, (main_w, main_h), interpolation=cv2.INTER_LINEAR)
-    
+    # stitched_r = cv2.resize(stitched_img, (main_w, main_h), interpolation=cv2.INTER_LINEAR)
+    # 
+    h_st, w_st = stitched_img.shape[:2]
+    scale = min(main_w / w_st, main_h / h_st)
+    new_w = int(w_st * scale)
+    new_h = int(h_st * scale)
+    stitched_resized = cv2.resize(stitched_img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+    # Center it in the main panel
+    stitched_r = np.zeros((main_h, main_w, 3), dtype=np.uint8)
+    offset_x = (main_w - new_w) // 2
+    offset_y = (main_h - new_h) // 2
+    stitched_r[offset_y:offset_y+new_h, offset_x:offset_x+new_w] = stitched_resized
+
     combined[0:main_h, 0:side_w] = bev0_r
     combined[0:main_h, side_w:side_w+main_w] = stitched_r
     combined[0:main_h, side_w+main_w:] = bev3_r
